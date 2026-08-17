@@ -18,4 +18,4 @@ langchain
 
 
 application
-- ocr(terminal && streamlit) : extracts information from uploaded file
+- ocr(terminal && streamlit) : extracts information from uploaded file(govt id)
