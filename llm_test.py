@@ -17,15 +17,7 @@ Extract the following information from the document text:
 - Date of Birth
 - Document Number
 
-Document text:
-INCOME TAX DEPARTMENT
-Permanent Account Number Card
-ELWPM8089J
-Name
-RAHUL MISHRA
-Father's Name
-SATENDRA MISHRA
-30/01/1997
+
 """)
 
 print(response.content)
