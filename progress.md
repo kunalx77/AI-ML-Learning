@@ -12,7 +12,7 @@ langchain
 - models
 - prompts
 - structured output
-- output parsers
+- output parsers(str,json,structured)
 
 
 
