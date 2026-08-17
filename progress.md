@@ -13,3 +13,9 @@ langchain
 - prompts
 - structured output
 - output parsers
+
+
+
+
+application
+- ocr(terminal && streamlit)
