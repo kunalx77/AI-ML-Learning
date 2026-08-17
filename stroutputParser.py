@@ -11,7 +11,7 @@ template_1 = PromptTemplate(
 )
 
 template_2 = PromptTemplate(
-    template="write a 7 line summary on {text}",
+    template="write a 7 points summary on {text} and number each line",
     input_variables=["text"],
 )
 parser = StrOutputParser()

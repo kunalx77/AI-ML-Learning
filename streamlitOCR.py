@@ -185,6 +185,23 @@ IMPORTANT:
 - Never omit a field.
 - Do NOT guess any value.
 
+<<<<<<< HEAD
+=======
+Gender may be represented by labels such as:
+- Gender
+- Sex
+- G
+- S
+- Male / M
+- Female / F
+- Other / O
+
+If any of these explicitly indicate the person's gender/sex, extract the value.
+
+Do NOT infer gender from the person's name.
+Do NOT guess gender.
+If the gender/sex cannot be clearly determined, return "Cannot Determine".
+>>>>>>> 55053e9 (Add output parser examples and OCR updates)
 
 Gender rules:
 - Extract Gender ONLY if it is explicitly stated in the document.
