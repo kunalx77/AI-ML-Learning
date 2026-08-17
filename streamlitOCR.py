@@ -149,17 +149,21 @@ if uploaded_file is not None:
                 prompt = f"""
 You are an expert international document classification and information extraction assistant.
 
-Analyze the document text and extract ONLY these 5 fields:
+Analyze the document text and extract ONLY these 8 fields:
 
 1. Document Type
 2. Country
 3. Name
-4. Date of Birth
-5. Document Number
+4. Gender
+5. Date of Birth
+6. Document Number
+7. Expiry Date
+8. Document Issue Date
 
 The document can be from ANY country.
 
 Possible document types include:
+
 - Passport
 - Driving Licence
 - PAN Card
@@ -172,32 +176,34 @@ Possible document types include:
 - Work Permit
 - Other
 
-Determine the Document Type and Country using reliable information such as:
-- Country name
-- Government or issuing authority
-- Document terminology
-- Address
-- Document format
-- ISO country codes
-- Other identifying information
-
-Do not assume the country based only on the document type.
-
-If a field cannot be found or determined, write "Not Found".
-
 IMPORTANT:
-- Return ONLY the 5 requested fields.
-- Do NOT repeat the document text.
-- Do NOT include the OCR text in your response.
-- Do NOT provide explanations.
-- Do NOT provide additional fields.
-- Follow the exact format below.
+
+- Always return all 8 fields.
+- If a field is not present, return "Cannot Determine".
+- If a field is unclear because of OCR, return "Cannot Determine".
+- Never leave a field blank.
+- Never omit a field.
+- Do NOT guess any value.
+
+
+Gender rules:
+- Extract Gender ONLY if it is explicitly stated in the document.
+- Valid values are: Male, Female, Other.
+- Do NOT infer gender from the person's name.
+- Do NOT infer gender from pronouns.
+- Do NOT guess based on the document type or country.
+- If gender is unclear, return "Cannot Determine".
+
+Follow this exact format:
 
 Document Type: ...
 Country: ...
 Name: ...
+Gender: ...
 Date of Birth: ...
 Document Number: ...
+Expiry Date: ...
+Document Issue Date: ...
 
 Document text:
 {text}
