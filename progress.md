@@ -18,6 +18,7 @@ langchain
 
 
 application
-- ocr(terminal && streamlit) : extracts information from uploaded file(govt id)
+- ocr(terminal && streamlit) : extracts information from uploaded file
+- govt id ocr
 - loan form ocr
 - canada loan form ocr
