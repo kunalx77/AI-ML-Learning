@@ -24,3 +24,4 @@ application
 - canada loan form ocr
 - loan ocr chatbot(parse uploaded form, parse govt id, fill manually )
 - tried with paddle,easyocr,trocr
+- implemented open ai vision(handwritten ocr)
