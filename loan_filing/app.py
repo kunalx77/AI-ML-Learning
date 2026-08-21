@@ -1,12 +1,17 @@
 import os
+import io
+import base64
 
 import streamlit as st
 
+from dotenv import load_dotenv
+from openai import OpenAI
+
+from PIL import Image
+from pdf2image import convert_from_bytes, convert_from_path
+
 from form_extractor import extract_form_fields
-from test_ocr import (
-    get_ocr,
-    perform_ocr,
-)
+
 from id_extractor import (
     extract_id_information,
     parse_id_information,
@@ -14,6 +19,245 @@ from id_extractor import (
     parse_matched_fields,
     extract_filled_form_information,
 )
+
+# ============================================================
+# ENVIRONMENT / OPENAI CONFIGURATION
+# ============================================================
+
+load_dotenv()
+
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OPENAI_VISION_MODEL = os.getenv(
+    "OPENAI_VISION_MODEL",
+    "gpt-5.4-mini",
+)
+
+
+def create_openai_client():
+    """
+    Create the OpenAI client using the environment variable.
+
+    No API key is hardcoded in the application.
+    """
+    if not OPENAI_API_KEY:
+        raise ValueError(
+            "OPENAI_API_KEY was not found. "
+            "Please add OPENAI_API_KEY to your .env file."
+        )
+
+    return OpenAI(api_key=OPENAI_API_KEY)
+
+
+# ============================================================
+# OPENAI VISION OCR
+# ============================================================
+
+
+def image_to_data_url(image):
+    """
+    Convert a PIL image into a base64 JPEG data URL
+    suitable for OpenAI vision input.
+    """
+
+    buffer = io.BytesIO()
+
+    # Convert to RGB so PNG/RGBA/grayscale images are safe to encode as JPEG.
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+
+    image.save(
+        buffer,
+        format="JPEG",
+        quality=95,
+    )
+
+    encoded_image = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+    return f"data:image/jpeg;base64,{encoded_image}"
+
+
+def extract_text_from_image_with_openai(image):
+    """
+    Send one document page/image to OpenAI vision and return
+    OCR-style text.
+
+    Important:
+    This function only performs document text extraction.
+
+    It does NOT:
+    - identify loan fields
+    - validate fields
+    - match ID information
+    - modify application logic
+
+    Those existing responsibilities remain in the existing
+    extractor modules.
+    """
+
+    client = create_openai_client()
+
+    image_data_url = image_to_data_url(image)
+
+    prompt = """
+You are a high-accuracy document OCR engine.
+
+Read the ENTIRE document page shown in the image.
+
+Extract all visible text from the document.
+
+IMPORTANT RULES:
+
+1. Preserve the original reading order as closely as possible.
+
+2. Preserve form labels exactly or as closely as possible.
+
+3. Preserve values exactly as they appear.
+
+4. Preserve numbers, dates, phone numbers, email addresses,
+   identification numbers, currency amounts, names and addresses.
+
+5. Preserve checkbox and selection labels.
+
+6. If a checkbox is visibly checked or selected, represent it
+   clearly, for example:
+
+   [X] New Vehicle
+   [ ] Used Vehicle
+
+7. If a checkbox is visibly unchecked, represent it as:
+
+   [ ] Option Name
+
+8. Preserve table rows and columns as reasonably as possible
+   using spaces or lines.
+
+9. Do not summarize the document.
+
+10. Do not interpret the document.
+
+11. Do not guess missing text.
+
+12. Do not invent values.
+
+13. Do not add explanations.
+
+14. Do not convert the document into JSON.
+
+15. Do not extract only important information.
+
+16. Extract ALL readable text from the entire page.
+
+17. If text is unclear, make the best OCR transcription possible
+    without inventing information.
+
+18. Keep headings and section names.
+
+19. Keep field labels separate from their values when the layout
+    makes that distinction clear.
+
+20. Maintain approximate spatial/layout relationships whenever
+    possible.
+
+Return ONLY the OCR text.
+"""
+
+    response = client.responses.create(
+        model=OPENAI_VISION_MODEL,
+        input=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "input_text",
+                        "text": prompt,
+                    },
+                    {
+                        "type": "input_image",
+                        "image_url": image_data_url,
+                        "detail": "high",
+                    },
+                ],
+            }
+        ],
+    )
+
+    return response.output_text
+
+
+def get_ocr(pdf_path):
+    """
+    OCR an existing backend PDF form using OpenAI vision.
+
+    This keeps the same function name used by the existing
+    application, so the rest of the application does not need
+    to know that the OCR engine has changed.
+    """
+
+    pages = convert_from_path(
+        pdf_path,
+        dpi=200,
+    )
+
+    all_text = []
+
+    for page_number, page in enumerate(
+        pages,
+        start=1,
+    ):
+        page_text = extract_text_from_image_with_openai(page)
+
+        all_text.append(f"\n===== PAGE {page_number} =====\n\n" f"{page_text}")
+
+    return "\n".join(all_text)
+
+
+def perform_ocr(uploaded_file):
+    """
+    OCR an uploaded PDF or image using OpenAI vision.
+
+    The return value remains a plain OCR text string so the
+    existing form/id extraction code can continue working
+    unchanged.
+    """
+
+    file_bytes = uploaded_file.getvalue()
+    file_name = uploaded_file.name.lower()
+
+    all_text = []
+
+    # --------------------------------------------------------
+    # PDF
+    # --------------------------------------------------------
+
+    if file_name.endswith(".pdf"):
+
+        pages = convert_from_bytes(
+            file_bytes,
+            dpi=200,
+        )
+
+        for page_number, page in enumerate(
+            pages,
+            start=1,
+        ):
+            page_text = extract_text_from_image_with_openai(page)
+
+            all_text.append(f"\n===== PAGE {page_number} =====\n\n" f"{page_text}")
+
+    # --------------------------------------------------------
+    # IMAGE
+    # --------------------------------------------------------
+
+    else:
+
+        image = Image.open(io.BytesIO(file_bytes))
+
+        page_text = extract_text_from_image_with_openai(image)
+
+        all_text.append("\n===== PAGE 1 =====\n\n" f"{page_text}")
+
+    return "\n".join(all_text)
+
 
 # ============================================================
 # CONFIGURATION
@@ -34,11 +278,26 @@ st.set_page_config(
 # ============================================================
 
 loan_map = {
-    "Business Loan": ("business_loan.pdf", "💼"),
-    "Car Loan": ("car_loan.pdf", "🚗"),
-    "Education Loan": ("education_loan.pdf", "🎓"),
-    "Home Loan": ("home_loan.pdf", "🏠"),
-    "Personal Loan": ("personal_loan.pdf", "👤"),
+    "Business Loan": (
+        "business_loan.pdf",
+        "💼",
+    ),
+    "Car Loan": (
+        "car_loan.pdf",
+        "🚗",
+    ),
+    "Education Loan": (
+        "education_loan.pdf",
+        "🎓",
+    ),
+    "Home Loan": (
+        "home_loan.pdf",
+        "🏠",
+    ),
+    "Personal Loan": (
+        "personal_loan.pdf",
+        "👤",
+    ),
 }
 
 
@@ -126,6 +385,18 @@ st.markdown(
         letter-spacing: 0.06em;
         color: #64748b !important;
         margin-bottom: 9px;
+    }
+
+
+    /* =====================================================
+       PROCESSING PROGRESS
+    ===================================================== */
+
+    .processing-stage {
+        font-size: 13px;
+        color: #334155 !important;
+        font-weight: 600;
+        margin-bottom: 5px;
     }
 
 
@@ -446,12 +717,15 @@ for key, value in defaults.items():
     if key not in st.session_state:
 
         if isinstance(value, dict):
+
             st.session_state[key] = {}
 
         elif isinstance(value, list):
+
             st.session_state[key] = []
 
         else:
+
             st.session_state[key] = value
 
 
@@ -465,6 +739,7 @@ def parse_form_fields(extraction):
     sections = []
 
     current_section = None
+
     current_fields = []
 
     unsectioned_fields = []
@@ -623,6 +898,7 @@ def get_application_value(field):
 def set_application_value(field, value):
 
     if "final_form_values" not in st.session_state:
+
         st.session_state.final_form_values = {}
 
     st.session_state.final_form_values[field] = value
@@ -637,16 +913,72 @@ def update_current_field():
         if not get_application_value(field):
 
             st.session_state.current_field_index = index
+
             st.session_state.current_field_section = section
+
             st.session_state.current_field = field
 
             return section, field
 
     st.session_state.current_field_index = len(fields)
+
     st.session_state.current_field_section = None
+
     st.session_state.current_field = None
 
     return None, None
+
+
+# ============================================================
+# PROCESSING STATUS
+# ============================================================
+
+
+def create_processing_ui(title):
+
+    status = st.status(
+        title,
+        expanded=True,
+    )
+
+    progress = st.progress(
+        0,
+        text="Uploading Document...",
+    )
+
+    return status, progress
+
+
+def update_processing_stage(
+    status,
+    progress,
+    percentage,
+    message,
+):
+
+    progress.progress(
+        percentage,
+        text=message,
+    )
+
+    status.write(message)
+
+
+def finish_processing_ui(
+    status,
+    progress,
+):
+
+    progress.progress(
+        100,
+        text="Completed ✓",
+    )
+
+    status.update(
+        label="Completed ✓",
+        state="complete",
+        expanded=False,
+    )
 
 
 # ============================================================
@@ -778,6 +1110,7 @@ def render_chat():
     for message in st.session_state.messages:
 
         role = message["role"]
+
         content = message["content"]
 
         if role == "user":
@@ -828,6 +1161,7 @@ def render_loan_selection():
         ):
 
             st.session_state.loan_type = loan_name
+
             st.session_state.step = 1
 
             add_message(
@@ -907,6 +1241,7 @@ def render_filling_method():
         ):
 
             st.session_state.filling_method = method
+
             st.session_state.step = 2
 
             add_message(
@@ -953,7 +1288,9 @@ def render_filling_method():
     ):
 
         st.session_state.loan_type = None
+
         st.session_state.filling_method = None
+
         st.session_state.step = 0
 
         add_message(
@@ -986,15 +1323,55 @@ def load_form_fields():
     if st.session_state.form_sections is not None:
 
         update_current_field()
+
         return
 
-    with st.spinner("Reading your application form..."):
+    status = None
+    progress = None
 
-        try:
+    try:
+
+        with st.status(
+            "Preparing application form...",
+            expanded=True,
+        ) as status:
+
+            progress = st.progress(
+                0,
+                text="Preparing Pages...",
+            )
+
+            status.write("Preparing Pages...")
+
+            progress.progress(
+                20,
+                text="Preparing Pages...",
+            )
+
+            status.write("Running OCR Extraction...")
+
+            progress.progress(
+                50,
+                text="Running OCR Extraction...",
+            )
 
             ocr_text = get_ocr(form_path)
 
+            status.write("Extracting Loan Fields...")
+
+            progress.progress(
+                75,
+                text="Extracting Loan Fields...",
+            )
+
             extraction = extract_form_fields(ocr_text)
+
+            status.write("Finalizing Results...")
+
+            progress.progress(
+                90,
+                text="Finalizing Results...",
+            )
 
             sections = parse_form_fields(extraction)
 
@@ -1002,11 +1379,20 @@ def load_form_fields():
 
             update_current_field()
 
-        except Exception as e:
-
-            st.session_state.chat_error = (
-                "I couldn't read the application form: " + str(e)
+            progress.progress(
+                100,
+                text="Completed ✓",
             )
+
+            status.update(
+                label="Completed ✓",
+                state="complete",
+                expanded=False,
+            )
+
+    except Exception as e:
+
+        st.session_state.chat_error = "I couldn't read the application form: " + str(e)
 
 
 # ============================================================
@@ -1021,6 +1407,7 @@ def render_manual_application():
         load_form_fields()
 
     if st.session_state.chat_error:
+
         return
 
     section, field = update_current_field()
@@ -1165,13 +1552,58 @@ def render_filled_form():
                 with st.status(
                     "Processing application...",
                     expanded=True,
-                ):
+                ) as status:
 
-                    st.write("Reading uploaded document...")
+                    progress = st.progress(
+                        0,
+                        text="Uploading Document...",
+                    )
+
+                    # ----------------------------------------
+                    # STAGE 1
+                    # ----------------------------------------
+
+                    progress.progress(
+                        10,
+                        text="Uploading Document...",
+                    )
+
+                    status.write("Uploading Document...")
+
+                    # ----------------------------------------
+                    # STAGE 2
+                    # ----------------------------------------
+
+                    progress.progress(
+                        20,
+                        text="Preparing Pages...",
+                    )
+
+                    status.write("Preparing Pages...")
+
+                    # ----------------------------------------
+                    # STAGE 3
+                    # ----------------------------------------
+
+                    progress.progress(
+                        45,
+                        text="Running OCR Extraction...",
+                    )
+
+                    status.write("Running OCR Extraction...")
 
                     ocr_text = perform_ocr(uploaded_file)
 
-                    st.write("Reading application form...")
+                    # ----------------------------------------
+                    # FORM TEMPLATE
+                    # ----------------------------------------
+
+                    progress.progress(
+                        60,
+                        text="Reading application form...",
+                    )
+
+                    status.write("Reading application form...")
 
                     form_ocr = get_ocr(form_path)
 
@@ -1179,7 +1611,16 @@ def render_filled_form():
 
                     sections = parse_form_fields(form_extraction)
 
-                    st.write("Extracting application information...")
+                    # ----------------------------------------
+                    # STAGE 4
+                    # ----------------------------------------
+
+                    progress.progress(
+                        80,
+                        text="Extracting Loan Fields...",
+                    )
+
+                    status.write("Extracting Loan Fields...")
 
                     filled_extraction = extract_filled_form_information(
                         ocr_text,
@@ -1187,6 +1628,17 @@ def render_filled_form():
                     )
 
                     matched = parse_matched_fields(filled_extraction)
+
+                    # ----------------------------------------
+                    # STAGE 5
+                    # ----------------------------------------
+
+                    progress.progress(
+                        92,
+                        text="Finalizing Results...",
+                    )
+
+                    status.write("Finalizing Results...")
 
                     st.session_state.filled_form_sections = sections
 
@@ -1208,6 +1660,21 @@ def render_filled_form():
                     st.session_state.final_form_values = values
 
                     st.session_state.document_processed = True
+
+                    # ----------------------------------------
+                    # COMPLETE
+                    # ----------------------------------------
+
+                    progress.progress(
+                        100,
+                        text="Completed ✓",
+                    )
+
+                    status.update(
+                        label="Completed ✓",
+                        state="complete",
+                        expanded=False,
+                    )
 
                 add_message(
                     "user",
@@ -1281,19 +1748,73 @@ def render_government_id():
                 with st.status(
                     "Processing government ID...",
                     expanded=True,
-                ):
+                ) as status:
 
-                    st.write("Reading uploaded ID...")
+                    progress = st.progress(
+                        0,
+                        text="Uploading Document...",
+                    )
+
+                    # ----------------------------------------
+                    # STAGE 1
+                    # ----------------------------------------
+
+                    progress.progress(
+                        10,
+                        text="Uploading Document...",
+                    )
+
+                    status.write("Uploading Document...")
+
+                    # ----------------------------------------
+                    # STAGE 2
+                    # ----------------------------------------
+
+                    progress.progress(
+                        20,
+                        text="Preparing Pages...",
+                    )
+
+                    status.write("Preparing Pages...")
+
+                    # ----------------------------------------
+                    # STAGE 3
+                    # ----------------------------------------
+
+                    progress.progress(
+                        45,
+                        text="Running OCR Extraction...",
+                    )
+
+                    status.write("Running OCR Extraction...")
 
                     ocr_text = perform_ocr(uploaded_file)
 
-                    st.write("Extracting ID information...")
+                    # ----------------------------------------
+                    # ID EXTRACTION
+                    # ----------------------------------------
+
+                    progress.progress(
+                        65,
+                        text="Extracting Loan Fields...",
+                    )
+
+                    status.write("Extracting ID information...")
 
                     id_extraction = extract_id_information(ocr_text)
 
                     id_information = parse_id_information(id_extraction)
 
-                    st.write("Reading application form...")
+                    # ----------------------------------------
+                    # FORM TEMPLATE
+                    # ----------------------------------------
+
+                    progress.progress(
+                        75,
+                        text="Reading application form...",
+                    )
+
+                    status.write("Reading application form...")
 
                     form_ocr = get_ocr(form_path)
 
@@ -1301,7 +1822,16 @@ def render_government_id():
 
                     sections = parse_form_fields(form_extraction)
 
-                    st.write("Matching ID to application...")
+                    # ----------------------------------------
+                    # MATCHING
+                    # ----------------------------------------
+
+                    progress.progress(
+                        88,
+                        text="Matching ID to application...",
+                    )
+
+                    status.write("Matching ID to application...")
 
                     matched_extraction = match_id_to_form(
                         id_information,
@@ -1309,6 +1839,17 @@ def render_government_id():
                     )
 
                     matched = parse_matched_fields(matched_extraction)
+
+                    # ----------------------------------------
+                    # FINALIZE
+                    # ----------------------------------------
+
+                    progress.progress(
+                        95,
+                        text="Finalizing Results...",
+                    )
+
+                    status.write("Finalizing Results...")
 
                     st.session_state.id_form_sections = sections
 
@@ -1330,6 +1871,17 @@ def render_government_id():
                     st.session_state.final_form_values = values
 
                     st.session_state.document_processed = True
+
+                    progress.progress(
+                        100,
+                        text="Completed ✓",
+                    )
+
+                    status.update(
+                        label="Completed ✓",
+                        state="complete",
+                        expanded=False,
+                    )
 
                 add_message(
                     "user",
@@ -1414,6 +1966,7 @@ def render_extracted_information(
         ):
 
             st.session_state.step = 1
+
             st.session_state.document_processed = False
 
             st.rerun()
@@ -1428,6 +1981,7 @@ def render_extracted_information(
         ):
 
             st.session_state.extraction_confirmed = True
+
             st.session_state.step = 3
 
             add_message(
@@ -1582,6 +2136,7 @@ def render_review_controls():
         ):
 
             st.session_state.submitted = True
+
             st.session_state.step = 4
 
             add_message(
@@ -1613,6 +2168,7 @@ def render_submitted():
             padding:18px 20px;
             margin:10px 0 16px 0;
         ">
+
             <div style="
                 color:#166534 !important;
                 font-size:18px;
@@ -1628,6 +2184,7 @@ def render_submitted():
             ">
                 Your loan application has been submitted successfully.
             </div>
+
         </div>
         """,
         unsafe_allow_html=True,
@@ -1711,6 +2268,7 @@ def render_current_step():
     elif step == 3:
 
         render_summary()
+
         render_review_controls()
 
     elif step == 4:
@@ -1734,6 +2292,7 @@ form_files = [
 ]
 
 form_files.sort()
+
 
 if not form_files:
 

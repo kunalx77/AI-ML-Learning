@@ -1,2 +1,31 @@
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.so
+
+# Virtual environments
+venv/
+venv312/
+ocr_test_env/
+.env
+.env.*
+!.env.example
+
+# Streamlit
+.streamlit/secrets.toml
+
+# Generated files
+ocr_output/
+uploads/
+outputs/
+*.log
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Python cache
+.pytest_cache/
+.mypy_cache/

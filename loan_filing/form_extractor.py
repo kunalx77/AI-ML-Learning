@@ -22,7 +22,7 @@ def create_model():
     llm = HuggingFaceEndpoint(
         repo_id="Qwen/Qwen3-4B-Instruct-2507",
         task="text-generation",
-        provider="auto",
+        provider="nscale",
         huggingfacehub_api_token=hf_token,
         max_new_tokens=2500,
         temperature=0.0,
